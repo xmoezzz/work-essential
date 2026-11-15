@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 import RainCore
 #endif
 
+private enum TileFetchError: Error { case notFound }
+
 private actor TileCache {
     static let shared = TileCache()
     private let memory = NSCache<NSString, NSData>()
@@ -28,6 +30,7 @@ private actor TileCache {
         let session = self.session
         let task = Task<Data, Error> {
             let (data, response) = try await session.data(for: URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 18))
+            if (response as? HTTPURLResponse)?.statusCode == 404 { throw TileFetchError.notFound }
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 throw RainError.invalidResponse("地図 HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)")
             }
@@ -63,31 +66,37 @@ private final class GovernmentTileOverlay: MKTileOverlay {
         canReplaceMapContent = radarID == nil && replacesMap
     }
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
-        let address = TileAddress.parent(x: path.x, y: path.y, z: path.z, maximumNativeZoom: nativeMaximum)
-        var urlString = template.replacingOccurrences(of: "{z}", with: String(address.z))
-            .replacingOccurrences(of: "{x}", with: String(address.x))
-            .replacingOccurrences(of: "{y}", with: String(address.y))
-        if template.contains("{bbox}") {
-            let world = 20037508.342789244
-            let width = 2 * world / pow(2, Double(address.z))
-            let minX = -world + Double(address.x) * width
-            let maxY = world - Double(address.y) * width
-            let bbox = [minX, maxY - width, minX + width, maxY].map { String(format: "%.3f", $0) }.joined(separator: ",")
-            urlString = urlString.replacingOccurrences(of: "{bbox}", with: bbox)
-        }
-        guard let url = URL(string: urlString) else { result(nil, RainError.invalidData("地図タイルのURLが無効です")); return }
         Task {
-            do {
-                let raw = try await TileCache.shared.data(for: url)
-                let transformed = try Self.transform(raw, address: address, grayscale: grayscale)
-                result(transformed, nil)
-            } catch {
-                // A failed tile remains UNKNOWN, never synthesized as an all-clear tile.
-                failure("\(radarID == nil ? "背景地図" : "雨雲")タイル取得失敗: \(error.localizedDescription)", radarID)
-                result(nil, error)
+            var maximum = nativeMaximum
+            while true {
+                let address = TileAddress.parent(x: path.x, y: path.y, z: path.z, maximumNativeZoom: maximum)
+                var urlString = template.replacingOccurrences(of: "{z}", with: String(address.z))
+                    .replacingOccurrences(of: "{x}", with: String(address.x))
+                    .replacingOccurrences(of: "{y}", with: String(address.y))
+                if template.contains("{bbox}") {
+                    let world = 20037508.342789244
+                    let width = 2 * world / pow(2, Double(address.z))
+                    let minX = -world + Double(address.x) * width
+                    let maxY = world - Double(address.y) * width
+                    let bbox = [minX, maxY - width, minX + width, maxY].map { String(format: "%.3f", $0) }.joined(separator: ",")
+                    urlString = urlString.replacingOccurrences(of: "{bbox}", with: bbox)
+                }
+                guard let url = URL(string: urlString) else { result(nil, RainError.invalidData("地図タイルのURLが無効です")); return }
+                do {
+                    let raw = try await TileCache.shared.data(for: url)
+                    result(try Self.transform(raw, address: address, grayscale: grayscale), nil)
+                    return
+                } catch TileFetchError.notFound where radarID == nil && address.z > 5 {
+                    maximum = address.z - 1
+                } catch {
+                    failure("\(radarID == nil ? "背景地図" : "雨雲")タイル取得失敗: \(error.localizedDescription)", radarID)
+                    result(nil, error)
+                    return
+                }
             }
         }
     }
+
     private static func transform(_ data: Data, address: TileAddress, grayscale: Bool) throws -> Data {
         if address.subdivisions == 1 && !grayscale { return data }
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
