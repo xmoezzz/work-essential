@@ -143,7 +143,7 @@ struct DashboardView: View {
                 Link(store.campus.mapAttribution, destination: store.campus.mapSourceURL)
                 Link("観測データの出典", destination: store.campus.sourceURL)
                 if store.campus.supportsRadar {
-                    Link("気象庁の雨雲", destination: URL(string: "https://www.jma.go.jp/bosai/nowc/")!)
+                    Link(store.campus == .ito ? "気象庁の雨雲" : "カナダ気象庁のレーダー", destination: URL(string: store.campus == .ito ? "https://www.jma.go.jp/bosai/nowc/" : "https://weather.gc.ca/map_e.html?layers=radar")!)
                 }
                 Spacer()
                 Text("政府地図を白黒で表示").foregroundStyle(.secondary)
@@ -178,7 +178,8 @@ struct DashboardView: View {
                 Text("濃さ").font(.caption).foregroundStyle(.secondary)
                 Slider(value: $store.radarOpacity, in: 0.2...1).frame(width: 90)
                 Spacer()
-                RainLegend()
+                if store.campus == .ito { RainLegend() }
+                else { Text("最新のみ・雨換算（雪の区別なし）").font(.caption2); Link("レーダー凡例（mm/h）", destination: URL(string: "https://geo.weather.gc.ca/geomet?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetLegendGraphic&LAYER=RADAR_1KM_RRAI&STYLE=Radar-Rain_14colors&FORMAT=image/png")!) }
             }
         }.padding(.horizontal, 18).padding(.vertical, 14)
     }

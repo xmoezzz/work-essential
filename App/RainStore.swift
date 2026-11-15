@@ -142,6 +142,10 @@ final class RainStore: ObservableObject {
         watchEnabled = false
         notificationGate.reset()
         isPlaying = false
+        radarFrames = []
+        radarIndex = 0
+        lastAttempt["radar"] = nil
+        errors["radar"] = nil
         lab = Self.savedLab(for: value)
         inspectedStationID = value.stations[0].id
         showStationInspector = false
@@ -255,13 +259,14 @@ final class RainStore: ObservableObject {
         for provider in providers { lastAttempt[provider.key] = now }
         if radarDue { lastAttempt["radar"] = now; mapMessage = nil }
         let client = GovernmentClient()
+        let selectedCampus = campus
         await withTaskGroup(of: FetchOutcome.self) { group in
             for provider in providers { group.addTask {
                 do { return .snapshot(try await client.campusSnapshot(provider)) }
                 catch { return .failure(provider.key, error.localizedDescription) }
             } }
             if radarDue { group.addTask {
-                do { return .radar(try await client.radar()) }
+                do { return .radar(try await (selectedCampus == .ito ? client.radar() : client.northAmericanRadar())) }
                 catch { return .failure("radar", error.localizedDescription) }
             } }
             for await outcome in group {

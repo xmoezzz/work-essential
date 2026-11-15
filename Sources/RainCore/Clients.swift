@@ -2,6 +2,9 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 public struct GovernmentClient: Sendable {
     public init() {}
@@ -57,5 +60,39 @@ public struct GovernmentClient: Sendable {
     public func radar() async throws -> [RadarFrame] {
         let data = try await get(URL(string: "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json")!)
         return try JMAParser.radar(data)
+    }
+    public func northAmericanRadar() async throws -> [RadarFrame] {
+        let url = URL(string: "https://geo.weather.gc.ca/geomet?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities&LAYERS=RADAR_1KM_RRAI")!
+        let data = try await get(url)
+        let delegate = RadarCapabilitiesParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse(), let stamp = delegate.timestamp,
+              let date = ISO8601DateFormatter().date(from: stamp) else {
+            throw RainError.invalidData("北米レーダーの観測時刻を取得できません。")
+        }
+        let compact = RainClock.compact(date, utc: true)
+        return [RadarFrame(basetime: compact, validtime: compact, elements: ["geomet"])]
+    }
+
+}
+
+private final class RadarCapabilitiesParser: NSObject, XMLParserDelegate {
+    private var layerDepth = 0
+    private var targetDepth: Int?
+    private var readingName = false
+    private var name = ""
+    var timestamp: String?
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes: [String: String]) {
+        if elementName == "Layer" { layerDepth += 1 }
+        if elementName == "Name" { readingName = true; name = "" }
+        if elementName == "Dimension", targetDepth == layerDepth, attributes["name"] == "time" {
+            timestamp = attributes["default"]
+        }
+    }
+    func parser(_ parser: XMLParser, foundCharacters string: String) { if readingName { name += string } }
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName == "Name" { readingName = false; if name == "RADAR_1KM_RRAI" { targetDepth = layerDepth } }
+        if elementName == "Layer" { if targetDepth == layerDepth { targetDepth = nil }; layerDepth -= 1 }
     }
 }

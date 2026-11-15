@@ -64,9 +64,17 @@ private final class GovernmentTileOverlay: MKTileOverlay {
     }
     override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
         let address = TileAddress.parent(x: path.x, y: path.y, z: path.z, maximumNativeZoom: nativeMaximum)
-        let urlString = template.replacingOccurrences(of: "{z}", with: String(address.z))
+        var urlString = template.replacingOccurrences(of: "{z}", with: String(address.z))
             .replacingOccurrences(of: "{x}", with: String(address.x))
             .replacingOccurrences(of: "{y}", with: String(address.y))
+        if template.contains("{bbox}") {
+            let world = 20037508.342789244
+            let width = 2 * world / pow(2, Double(address.z))
+            let minX = -world + Double(address.x) * width
+            let maxY = world - Double(address.y) * width
+            let bbox = [minX, maxY - width, minX + width, maxY].map { String(format: "%.3f", $0) }.joined(separator: ",")
+            urlString = urlString.replacingOccurrences(of: "{bbox}", with: bbox)
+        }
         guard let url = URL(string: urlString) else { result(nil, RainError.invalidData("地図タイルのURLが無効です")); return }
         Task {
             do {
@@ -182,7 +190,7 @@ struct RainMapView: NSViewRepresentable {
                 let style = store.baseMapStyle
                 let template = store.campus.overseasBaseTemplate ?? "https://cyberjapandata.gsi.go.jp/xyz/\(style.layer)/{z}/{x}/{y}.png"
                 let overlay = GovernmentTileOverlay(template: template,
-                    nativeMaximum: store.campus == .ito ? style.maximumNativeZoom : 16,
+                    nativeMaximum: store.campus == .ito ? style.maximumNativeZoom : (store.campus == .waterloo ? 15 : 16),
                     grayscale: store.campus != .ito || style == .grayRoads, failure: onFailure)
                 base = overlay
                 map.insertOverlay(overlay, at: 0, level: .aboveLabels)
@@ -201,7 +209,12 @@ struct RainMapView: NSViewRepresentable {
                 // Clear the map warning only when the selected layer changes; a failure is not dry weather.
                 DispatchQueue.main.async { [weak self] in self?.store.mapMessage = nil }
                 if let frame = desiredFrame {
-                    let overlay = GovernmentTileOverlay(template: frame.tileTemplate, nativeMaximum: 10, grayscale: false,
+                    let template: String
+                    if frame.elements.contains("geomet"), let date = frame.date {
+                        let stamp = ISO8601DateFormatter().string(from: date)
+                        template = "https://geo.weather.gc.ca/geomet?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=RADAR_1KM_RRAI&STYLES=Radar-Rain_14colors&SRS=EPSG:3857&BBOX={bbox}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=TRUE&TIME=\(stamp)"
+                    } else { template = frame.tileTemplate }
+                    let overlay = GovernmentTileOverlay(template: template, nativeMaximum: 10, grayscale: false,
                                                         radarID: frame.id, failure: onFailure)
                     radar = overlay
                     map.addOverlay(overlay, level: .aboveLabels)

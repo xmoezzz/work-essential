@@ -45,7 +45,7 @@ public enum Campus: String, CaseIterable, Codable, Identifiable, Sendable {
     public var providers: [Provider] {
         switch self { case .ito: return [.fukuoka, .jma]; case .waterloo: return [.waterloo]; case .wyoming: return [.wyoming] }
     }
-    public var supportsRadar: Bool { self == .ito }
+    public var supportsRadar: Bool { true }
     public var supportsQuietWatch: Bool { self != .wyoming }
     public var watchDescription: String {
         switch self {

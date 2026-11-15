@@ -135,7 +135,8 @@ final class InternationalTests: XCTestCase {
         XCTAssertFalse(Campus.waterloo.contains(Campus.ito.center))
         XCTAssertTrue(Campus.waterloo.contains(Stations.soulis.instrumentLocation!))
         XCTAssertFalse(Campus.wyoming.supportsQuietWatch)
-        XCTAssertFalse(Campus.waterloo.supportsRadar)
+        XCTAssertTrue(Campus.waterloo.supportsRadar)
+        XCTAssertTrue(Campus.wyoming.supportsRadar)
     }
     func testOverseasManualCoordinateValidation() {
         XCTAssertNotNil(StationPosition.user(latitude: 41.32, longitude: -105.56, note: "manual"))
